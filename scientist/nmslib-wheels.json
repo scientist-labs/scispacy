@@ -1,0 +1,14 @@
+{
+  "amd64": {
+    "filename": "nmslib-2.1.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+    "url": "https://files.pythonhosted.org/packages/1e/4d/4253856673a68baae0b1422ae4fa6f69cbc3e1f1094d86f1a1d8a251296f/nmslib-2.1.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+    "sha256": "e59da1de1dda6d75142307c0987dc42a610d2481dfe961e56a9ebf4d2b8ba49f",
+    "size": 1052411
+  },
+  "arm64": {
+    "filename": "nmslib-2.1.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+    "url": "https://files.pythonhosted.org/packages/40/7e/0bf8f853384b7bbf5aba9a3ce4cee216f967be9bcb6ce122d8736ac24d6d/nmslib-2.1.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+    "sha256": "da33cdfd986029832d794ee7548ee4ab4069a5e94202f1f860119220e91f34f8",
+    "size": 995825
+  }
+}

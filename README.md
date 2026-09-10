@@ -1,5 +1,11 @@
 <p align="center"><img width="50%" src="docs/scispacy-logo.png" /></p>
 
+> **Scientist public fork:** submit PRs to `scientist-main`; `main` mirrors upstream.
+> Fork packages are published as [GitHub Release assets](https://github.com/scientist-labs/scispacy/releases),
+> not to PyPI. See [Scientist releases](scientist/README.md) for installation, native
+> Linux ARM64/amd64 qualification, and the `vX.Y.Z-sci.N` version policy.
+> The installation instructions below describe the upstream PyPI release.
+
 
 This repository contains custom pipes and models related to using spaCy for scientific documents.
 

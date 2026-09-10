@@ -39,6 +39,8 @@ license-files = [
 requires-python = ">=3.9,<3.13"
 dependencies = [
     "spacy>=3.7.0,<3.9.0",
+    # spaCy 3.8 imports Click directly; Typer 0.26+ no longer supplies it.
+    "typer<0.26",
     "scipy",
     "requests>=2.0.0,<3.0.0",
     "conllu",
@@ -54,7 +56,8 @@ dependencies = [
 # and also https://packaging.python.org/en/latest/specifications/well-known-project-urls/
 [project.urls]
 Homepage = "https://allenai.github.io/scispacy/"
-Repository = "https://github.com/allenai/scispacy"
+Repository = "https://github.com/scientist-labs/scispacy"
+Upstream = "https://github.com/allenai/scispacy"
 
 # see https://peps.python.org/pep-0735/ and https://docs.astral.sh/uv/concepts/dependencies/#dependency-groups
 [dependency-groups]
@@ -68,7 +71,7 @@ tests = [
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["*.tests", "*.tests.*", "tests.*", "tests"]
+exclude = ["*.tests", "*.tests.*", "tests.*", "tests", "scientist", "scientist.*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "scispacy.version.VERSION"}

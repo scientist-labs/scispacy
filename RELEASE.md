@@ -1,5 +1,10 @@
 
-### Creating a release
+### Scientist fork releases
+
+Use [scientist/README.md](scientist/README.md). Scientist releases publish GitHub
+assets from `scientist-main`, not PyPI packages or newly trained models.
+
+### Creating an upstream release
 
 Scispacy has two components:
 
