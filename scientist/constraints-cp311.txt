@@ -1,0 +1,7 @@
+# Native Linux CPython 3.11 qualification pins, not a complete application lock.
+nmslib==2.1.2
+numpy==1.26.4
+scipy==1.17.1
+scikit-learn==1.6.1
+spacy==3.8.14
+typer==0.25.0

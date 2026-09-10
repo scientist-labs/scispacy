@@ -1,0 +1,191 @@
+name: Scientist wheels
+
+on:
+  pull_request:
+    branches: [scientist-main]
+  push:
+    branches: [scientist-main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Release allocation and publication are serialized, including manual runs.
+# PRs have separate groups and never receive a publishing token.
+concurrency:
+  group: scientist-wheels-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Multi-arch official Python 3.11.16 / Debian Bookworm image. No QEMU.
+  PYTHON_IMAGE: python@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+
+jobs:
+  package:
+    name: Package and release-tool tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Test release policy
+        run: python -m unittest discover -s scientist -p 'test_*.py' -v
+      - name: Allocate next identity (no remote writes)
+        id: plan
+        run: python scientist/release.py plan >> "$GITHUB_OUTPUT"
+      - name: Build the universal wheel and source distribution once
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          python -m pip install --only-binary=:all: -r scientist/build-requirements.txt
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          python scientist/release.py stamp "$TAG"
+          python -m build --no-isolation
+          python scientist/release.py verify-package "$TAG" dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scientist-package
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  native:
+    name: Native Linux (${{ matrix.arch }})
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: scientist-package
+          path: dist
+      - name: Fetch the reviewed official nmslib wheel
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: python scientist/release.py fetch-nmslib "$ARCH" dist
+      - name: Qualify installed wheels natively on Bookworm
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.package.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) echo 'Refusing an emulated or incorrectly routed build'; exit 1 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/proof"
+          docker run --rm --platform "linux/$ARCH" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" -v "$RUNNER_TEMP/proof:/proof" \
+            -e VERSION -e ARCH -e SOURCE_SHA "$PYTHON_IMAGE" bash -euo pipefail -c '
+              python -m venv /tmp/venv
+              /tmp/venv/bin/python -m pip install --only-binary=:all: \
+                -c /workspace/scientist/constraints-cp311.txt \
+                /workspace/dist/scispacy-*.whl /workspace/dist/nmslib-*.whl
+              /tmp/venv/bin/python -m pip check
+              cd /tmp
+              /tmp/venv/bin/python /workspace/scientist/smoke.py \
+                "$VERSION" "$ARCH" "$SOURCE_SHA" \
+                /workspace/tests/fixtures/umls_test_fixture.json \
+                "/proof/proof-linux-$ARCH-cp311.json"
+            '
+          cp "$RUNNER_TEMP/proof/proof-linux-$ARCH-cp311.json" dist/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scientist-native-${{ matrix.arch }}
+          path: |
+            dist/nmslib-*.whl
+            dist/proof-linux-*.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  publish:
+    name: Publish GitHub release assets
+    needs: [package, native]
+    if: >-
+      github.repository == 'scientist-labs/scispacy' &&
+      github.ref == 'refs/heads/scientist-main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: scientist-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify, reserve the tag, and publish only complete releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.package.outputs.tag }}
+          VERSION: ${{ needs.package.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          # Pending runs can be superseded by a newer integration-branch push.
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/scientist-main" --jq .object.sha)
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            echo 'A newer integration commit exists; its workflow will publish instead.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Recheck allocation after the native jobs. A manually reserved tag
+          # must never be overwritten or silently reused.
+          python scientist/release.py plan | grep -Fx "tag=$TAG"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python scientist/release.py bundle "$TAG" "$SOURCE_SHA" "$run_url" release-assets
+          (cd release-assets && sha256sum -c SHA256SUMS)
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Scientist scispaCy **$VERSION**, from commit $SOURCE_SHA.
+
+          Native Linux **amd64 + arm64**, CPython 3.11, Debian Bookworm wheel-install and local ANN checks passed: $run_url
+
+          - scispaCy is pure Python: its py3-none-any wheel supports both architectures.
+          - The two nmslib 2.1.2 wheels are **unmodified official PyPI artifacts**, not Scientist rebuilds. Sources and original SHA256 hashes are in PROVENANCE.json.
+          - SHA256SUMS covers all other assets. Qualification dependency versions are recorded in the per-architecture proof JSONs.
+          - Models/KBs are not included. This is not certification of a downstream redaction pipeline or a full dependency wheelhouse.
+
+          Install the versioned wheel asset rather than GitHub's autogenerated source archive; only the packaged wheel/sdist carries the Scientist version stamp.
+          EOF
+          # Reserving a tag consumes N even if a later upload fails. Gaps are
+          # allowed; re-run ALL jobs to allocate a new N. Never force a tag.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$TAG" -f "sha=$SOURCE_SHA" > /dev/null
+          gh release create "$TAG" --verify-tag --draft --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" release-assets/*
+          mkdir -p "$RUNNER_TEMP/release-download"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/release-download"
+          (cd "$RUNNER_TEMP/release-download" && sha256sum -c SHA256SUMS)
+          gh release edit "$TAG" --draft=false --latest
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
